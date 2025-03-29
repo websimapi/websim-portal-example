@@ -1,0 +1,24 @@
+script.js
+`````` index.html
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Portal Example</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="style.css">
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+    <div id="loading-screen">Loading...</div>
+    <div id="info">Click to start! Use WASD/Arrow keys to move, Mouse to look around.</div>
+    <script type="module" src="main.js"></script>
+</body>
+</html>
+
