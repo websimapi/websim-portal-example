@@ -3,12 +3,12 @@ import { PointerLockControls } from 'three/addons/controls/PointerLockControls.j
 import config from './config.js';
 
 let scene, camera, renderer, controls;
-let player, playerVelocity = new THREE.Vector3();
+let player, playerVelocity = new THREE.Vector3(); // Keep velocity for potential physics/smoothness later
 let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
 let clock = new THREE.Clock();
 
-let exitPortalGroup, exitPortalBox, exitPortalInnerMesh; 
-let startPortalGroup, startPortalBox, startPortalInnerMesh; 
+let exitPortalGroup, exitPortalBox, exitPortalInnerMesh;
+let startPortalGroup, startPortalBox, startPortalInnerMesh;
 let exitPortalParticles, startPortalParticles;
 
 const urlParams = new URLSearchParams(window.location.search);
@@ -22,15 +22,16 @@ const portalSpeed = parseFloat(urlParams.get('speed'));
 
 if (portalUsername) config.player.username = portalUsername;
 if (portalColor) config.player.color = portalColor;
-if (!isNaN(portalSpeed)) config.player.speed = portalSpeed;
+// Note: We don't currently use the incoming speed parameter directly for control, but keep config updated.
+// if (!isNaN(portalSpeed)) config.player.speed = portalSpeed;
 
 function init() {
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x87ceeb);
-    scene.fog = new THREE.Fog(0x87ceeb, 0, 150); 
+    scene.fog = new THREE.Fog(0x87ceeb, 0, 150);
 
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(config.spawnPoint.x, config.spawnPoint.y + 1.6, config.spawnPoint.z + 5);
+    // Camera position will be set relative to player spawn by controls
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -41,31 +42,36 @@ function init() {
     scene.add(ambientLight);
     const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
     directionalLight.position.set(50, 80, 30);
-    directionalLight.castShadow = true; 
+    directionalLight.castShadow = true;
     scene.add(directionalLight);
 
     const groundGeometry = new THREE.PlaneGeometry(500, 500);
     const groundMaterial = new THREE.MeshStandardMaterial({ color: 0x228B22, roughness: 0.8, metalness: 0.2 });
     const ground = new THREE.Mesh(groundGeometry, groundMaterial);
     ground.rotation.x = -Math.PI / 2;
-    ground.receiveShadow = true; 
+    ground.receiveShadow = true;
     scene.add(ground);
 
-    const playerGeometry = new THREE.CapsuleGeometry(0.5, 1, 4, 8); 
-    playerGeometry.translate(0, 0.5, 0); 
+    const playerGeometry = new THREE.CapsuleGeometry(0.5, 1, 4, 8); // Radius 0.5, Height 1 (total height 1 + 2*0.5 = 2)
+    playerGeometry.translate(0, 0.5, 0); // Move geometry up so base is at origin Y=0
     const playerMaterial = new THREE.MeshStandardMaterial({
         color: config.player.color,
         roughness: 0.5,
         metalness: 0.3
     });
     player = new THREE.Mesh(playerGeometry, playerMaterial);
-    player.position.set(config.spawnPoint.x, config.spawnPoint.y, config.spawnPoint.z);
-    player.castShadow = true; 
+    player.position.set(config.spawnPoint.x, config.spawnPoint.y, config.spawnPoint.z); // Place base at spawn point
+    player.castShadow = true;
     scene.add(player);
-    player.userData.velocity = playerVelocity; 
+    // player.userData.velocity = playerVelocity; // Not currently used directly for movement
 
     controls = new PointerLockControls(camera, document.body);
-    controls.getObject().position.set(player.position.x, player.position.y + 1.6, player.position.z);
+    // Position the controls object (camera's parent) at eye level above the player's base position
+    controls.getObject().position.set(
+        player.position.x,
+        player.position.y + config.player.eyeHeight, // Use eyeHeight from config
+        player.position.z
+    );
     scene.add(controls.getObject());
 
     const infoElement = document.getElementById('info');
@@ -73,12 +79,12 @@ function init() {
 
     const startExperience = () => {
         controls.lock();
-        loadingScreen.style.opacity = '0'; 
-        setTimeout(() => { loadingScreen.style.display = 'none'; }, 500); 
+        loadingScreen.style.opacity = '0';
+        setTimeout(() => { loadingScreen.style.display = 'none'; }, 500);
     };
 
     infoElement.addEventListener('click', startExperience);
-    loadingScreen.addEventListener('click', startExperience); 
+    loadingScreen.addEventListener('click', startExperience);
 
     controls.addEventListener('lock', () => {
         infoElement.style.display = 'none';
@@ -88,6 +94,11 @@ function init() {
         if (loadingScreen.style.display !== 'none') {
              infoElement.style.display = 'block';
         }
+        // Reset movement keys on unlock
+        moveForward = false;
+        moveBackward = false;
+        moveLeft = false;
+        moveRight = false;
     });
 
     document.addEventListener('keydown', onKeyDown);
@@ -100,6 +111,7 @@ function init() {
     }
 
     if (isComingFromPortal) {
+        // Skip loading screen and attempt to lock pointer immediately
         loadingScreen.style.display = 'none';
         infoElement.style.display = 'none';
         try {
@@ -108,12 +120,16 @@ function init() {
             console.warn("Could not automatically lock pointer. User interaction might be needed.");
              infoElement.textContent = "Click to enter the world!";
              infoElement.style.display = 'block';
+             // Ensure the startExperience function is available if immediate lock fails
+             infoElement.addEventListener('click', startExperience);
+             loadingScreen.addEventListener('click', startExperience);
         }
     }
 
     animate();
 }
 
+// ... (createPortalVisuals, createExitPortal, createStartPortal, createPortalLabel, getDomain remain the same) ...
 function createPortalVisuals(color, position, rotation) {
     const portalGroup = new THREE.Group();
     portalGroup.position.set(position.x, position.y, position.z);
@@ -123,7 +139,7 @@ function createPortalVisuals(color, position, rotation) {
         portalGroup.rotation.z = rotation.z || 0;
     }
 
-    const portalRadius = 5; 
+    const portalRadius = 5;
     const tubeRadius = 0.75;
 
     const portalGeometry = new THREE.TorusGeometry(portalRadius, tubeRadius, 16, 100);
@@ -138,19 +154,19 @@ function createPortalVisuals(color, position, rotation) {
     const portalRing = new THREE.Mesh(portalGeometry, portalMaterial);
     portalGroup.add(portalRing);
 
-    const portalInnerGeometry = new THREE.CircleGeometry(portalRadius - tubeRadius, 32); 
+    const portalInnerGeometry = new THREE.CircleGeometry(portalRadius - tubeRadius, 32);
     const portalInnerMaterial = new THREE.MeshBasicMaterial({
         color: color,
         transparent: true,
-        opacity: 0.3, 
+        opacity: 0.3,
         side: THREE.DoubleSide,
-        blending: THREE.AdditiveBlending, 
-        depthWrite: false 
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
     });
     const portalInner = new THREE.Mesh(portalInnerGeometry, portalInnerMaterial);
     portalGroup.add(portalInner);
 
-    const particleCount = 1000; 
+    const particleCount = 1000;
     const particles = new THREE.BufferGeometry();
     const positions = new Float32Array(particleCount * 3);
     const colors = new Float32Array(particleCount * 3);
@@ -158,12 +174,12 @@ function createPortalVisuals(color, position, rotation) {
 
     for (let i = 0; i < particleCount * 3; i += 3) {
         const angle = Math.random() * Math.PI * 2;
-        const radius = portalRadius + (Math.random() - 0.5) * tubeRadius * 2.5; 
-        positions[i] = Math.cos(angle) * radius; 
-        positions[i + 1] = Math.sin(angle) * radius; 
-        positions[i + 2] = (Math.random() - 0.5) * tubeRadius * 1.5; 
+        const radius = portalRadius + (Math.random() - 0.5) * tubeRadius * 2.5;
+        positions[i] = Math.cos(angle) * radius;
+        positions[i + 1] = Math.sin(angle) * radius;
+        positions[i + 2] = (Math.random() - 0.5) * tubeRadius * 1.5;
 
-        colors[i] = particleBaseColor.r * (0.7 + Math.random() * 0.6); 
+        colors[i] = particleBaseColor.r * (0.7 + Math.random() * 0.6);
         colors[i + 1] = particleBaseColor.g * (0.7 + Math.random() * 0.6);
         colors[i + 2] = particleBaseColor.b * (0.7 + Math.random() * 0.6);
     }
@@ -172,7 +188,7 @@ function createPortalVisuals(color, position, rotation) {
     particles.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
     const particleMaterial = new THREE.PointsMaterial({
-        size: 0.08, 
+        size: 0.08,
         vertexColors: true,
         transparent: true,
         opacity: 0.6,
@@ -182,39 +198,43 @@ function createPortalVisuals(color, position, rotation) {
 
     const particleSystem = new THREE.Points(particles, particleMaterial);
     portalGroup.add(particleSystem);
-    portalGroup.userData.particles = particles; 
+    portalGroup.userData.particles = particles;
 
     scene.add(portalGroup);
+    // Use the inner mesh for tighter collision detection
     const portalBox = new THREE.Box3().setFromObject(portalInner);
 
-    return { group: portalGroup, box: portalBox, innerMesh: portalInner }; 
+    // Adjust box slightly to better encompass the inner circle area for collision
+    portalBox.expandByScalar(0.5); // Slightly expand the collision box
+
+    return { group: portalGroup, box: portalBox, innerMesh: portalInner };
 }
 
 function createExitPortal() {
     const result = createPortalVisuals(
         config.exitPortalColor,
         config.exitPortalPosition,
-        { x: 0.1, y: Math.PI / 4 } 
+        { x: 0.1, y: Math.PI / 4 } // Keep existing rotation
     );
     exitPortalGroup = result.group;
     exitPortalBox = result.box;
     exitPortalInnerMesh = result.innerMesh;
     exitPortalParticles = exitPortalGroup.userData.particles;
 
-    createPortalLabel(exitPortalGroup, 'VIBEVERSE PORTAL', config.exitPortalColor, 10, 2); 
+    createPortalLabel(exitPortalGroup, 'VIBEVERSE PORTAL', config.exitPortalColor, 10, 2);
 }
 
 function createStartPortal() {
-    const offset = 10;
+    const offset = 10; // Keep offset logic
     const startPos = {
         x: config.spawnPoint.x,
-        y: config.exitPortalPosition.y, 
+        y: config.exitPortalPosition.y, // Align Y with exit portal's height for visual consistency
         z: config.spawnPoint.z + offset
     };
     const result = createPortalVisuals(
         config.startPortalColor,
         startPos,
-        { x: 0, y: Math.PI } 
+        { x: 0, y: Math.PI } // Rotate to face player spawn
     );
     startPortalGroup = result.group;
     startPortalBox = result.box;
@@ -232,11 +252,12 @@ function createPortalLabel(parentGroup, text, color, width, height) {
     context.font = `bold ${font_size}px Arial`;
 
     const textWidth = context.measureText(text).width;
-    canvas.width = THREE.MathUtils.ceilPowerOfTwo(textWidth + 40); 
-    canvas.height = THREE.MathUtils.ceilPowerOfTwo(font_size + 20); 
+    canvas.width = THREE.MathUtils.ceilPowerOfTwo(textWidth + 40);
+    canvas.height = THREE.MathUtils.ceilPowerOfTwo(font_size + 20);
 
     context.font = `bold ${font_size}px Arial`;
-    context.fillStyle = `rgba(${new THREE.Color(color).toArray().map(c => c * 255).join(',')}, 1)`;
+    // Use configured color for text fill
+    context.fillStyle = new THREE.Color(color).getStyle(); // Use THREE.Color style for canvas
     context.textAlign = 'center';
     context.textBaseline = 'middle';
     context.fillText(text, canvas.width / 2, canvas.height / 2);
@@ -249,11 +270,11 @@ function createPortalLabel(parentGroup, text, color, width, height) {
         map: texture,
         transparent: true,
         side: THREE.DoubleSide,
-        depthWrite: false
+        depthWrite: false // Don't obscure portal visuals
     });
     const label = new THREE.Mesh(labelGeometry, labelMaterial);
-    label.position.y = 6.5; 
-    label.rotation.y = Math.PI; 
+    label.position.y = 6.5; // Position above the portal ring
+    // label.rotation.y = Math.PI; // Should face away from portal center - let parent group handle main rotation
     parentGroup.add(label);
 }
 
@@ -264,28 +285,31 @@ function getDomain(url) {
         return hostname;
     } catch (e) {
         console.error("Invalid ref URL for domain extraction:", url);
-        return "???"; 
+        return "???";
     }
 }
+
 
 function animatePortalParticles(particles) {
     if (!particles) return;
     const positions = particles.attributes.position.array;
-    const time = Date.now() * 0.0005; 
+    const time = Date.now() * 0.0005;
 
     for (let i = 0; i < positions.length; i += 3) {
         const x = positions[i];
         const y = positions[i+1];
-        const z = positions[i+2];
+        const z = positions[i+2]; // Original Z offset
 
+        // Keep existing swirl and Z oscillation logic
         const angle = Math.atan2(y, x);
         const radius = Math.sqrt(x*x + y*y);
-        const swirlFactor = 0.3; 
-        const newAngle = angle + swirlFactor * time + radius * 0.1; 
+        const swirlFactor = 0.3;
+        const newAngle = angle + swirlFactor * time + radius * 0.1;
 
-        positions[i] = Math.cos(newAngle) * radius;
-        positions[i + 1] = Math.sin(newAngle) * radius;
+        positions[i] = Math.cos(newAngle) * radius; // Update X based on swirl
+        positions[i + 1] = Math.sin(newAngle) * radius; // Update Y based on swirl
 
+        // Modulate Z based on time and angle for a wave effect
         positions[i + 2] = z + Math.sin(time * 5 + angle * 3) * 0.1;
     }
     particles.attributes.position.needsUpdate = true;
@@ -316,92 +340,111 @@ function onWindowResize() {
 }
 
 function updatePlayer(delta) {
-    if (!controls.isLocked) {
-        playerVelocity.multiplyScalar(0); 
-        return;
-    }
+    if (!controls.isLocked) return; // Only move when pointer is locked
 
-    const speed = config.player.speed * 50; 
-    const damping = 10.0;
+    const speed = config.player.speed; // Use speed directly from config
 
-    playerVelocity.x -= playerVelocity.x * damping * delta;
-    playerVelocity.z -= playerVelocity.z * damping * delta;
-
-    const direction = new THREE.Vector3();
+    // Calculate forward and right vectors based on camera orientation (projected onto XZ plane)
     const forward = new THREE.Vector3();
     camera.getWorldDirection(forward);
-    forward.y = 0; 
+    forward.y = 0;
     forward.normalize();
 
     const right = new THREE.Vector3();
-    right.crossVectors(camera.up, forward).normalize(); 
+    right.crossVectors(camera.up, forward).normalize(); // camera.up is typically (0, 1, 0)
 
-    if (moveForward) direction.add(forward);
-    if (moveBackward) direction.sub(forward);
-    if (moveLeft) direction.sub(right); 
-    if (moveRight) direction.add(right); 
+    // Determine net movement direction based on key states
+    const direction = new THREE.Vector3();
+    let isMoving = false;
+    if (moveForward) { direction.add(forward); isMoving = true; }
+    if (moveBackward) { direction.sub(forward); isMoving = true; }
+    if (moveLeft) { direction.sub(right); isMoving = true; }
+    if (moveRight) { direction.add(right); isMoving = true; }
 
-    direction.normalize(); 
+    if (isMoving) {
+        direction.normalize(); // Ensure consistent speed for diagonal movement
 
-    playerVelocity.x += direction.x * speed * delta;
-    playerVelocity.z += direction.z * speed * delta;
+        // Calculate displacement vector for this frame
+        const displacement = direction.multiplyScalar(speed * delta);
 
-    controls.moveRight(playerVelocity.x * delta);
-    controls.moveForward(playerVelocity.z * delta); 
+        // Move the controls object (camera's parent)
+        // controls.moveForward/Right work relative to the camera's local axes
+        controls.getObject().position.add(displacement);
+    }
 
-    player.position.copy(controls.getObject().position);
-    player.position.y = config.spawnPoint.y; 
+    // Keep camera (controls object) at a fixed height above the spawn Y level
+    // This prevents flying/falling without collision detection
+    controls.getObject().position.y = config.spawnPoint.y + config.player.eyeHeight;
 
-    controls.getObject().position.y = player.position.y + 1.6; 
+    // Update the player mesh model position to follow the camera horizontally,
+    // and position its base at the spawn Y level.
+    player.position.x = controls.getObject().position.x;
+    player.position.z = controls.getObject().position.z;
+    player.position.y = config.spawnPoint.y; // Keep player mesh base on the "ground"
+
+    // Update player mesh rotation to face the direction the camera is looking horizontally
+    player.rotation.y = Math.atan2(forward.x, forward.z);
 }
+
 
 function checkPortalCollisions() {
     if (!player || isRedirecting || !controls.isLocked) return;
 
+    // Use the camera's position (controls object) for collision checks, as it's the viewpoint
     const playerPosition = controls.getObject().position;
 
-    if (exitPortalGroup) {
-        const portalCenter = new THREE.Vector3();
-        exitPortalBox.getCenter(portalCenter); 
-        const distanceToExit = playerPosition.distanceTo(portalCenter);
+    // Helper function for portal check logic
+    const checkPortal = (portalGroup, portalInnerMesh, targetUrl, isReturn) => {
+        if (!portalGroup) return false; // Portal doesn't exist
 
-        if (distanceToExit < config.portalInteractionDistance) {
-             if (distanceToExit < config.portalCollisionThreshold) {
-                  const raycaster = new THREE.Raycaster(playerPosition, portalCenter.clone().sub(playerPosition).normalize());
-                  const intersects = raycaster.intersectObject(exitPortalInnerMesh); 
+        // Use the inner mesh for collision check - more accurate than group bounding box
+        // Create a temporary bounding box for the player's current position
+        // A small box around the camera position is sufficient
+        const playerCollider = new THREE.Box3(
+            playerPosition.clone().subScalar(0.1), // Small box around camera feet
+            playerPosition.clone().addScalar(0.1)
+        );
+        playerCollider.min.y = playerPosition.y - config.player.eyeHeight; // Box base at player feet level
+        playerCollider.max.y = playerPosition.y; // Box top near camera feet
 
-                  if (intersects.length > 0 && intersects[0].distance < 1.5) { 
-                      triggerPortal(config.portalTargetUrl, false);
-                      return; 
-                  }
-             }
+
+        // Create a world-space bounding box for the portal inner mesh
+        const portalWorldBox = new THREE.Box3().setFromObject(portalInnerMesh, true); // Use precise bounding box
+
+
+        // Check for intersection between player collider and portal inner mesh box
+        if (playerCollider.intersectsBox(portalWorldBox)) {
+            // Optional: Finer check using distance to portal center
+            const portalCenter = new THREE.Vector3();
+            portalWorldBox.getCenter(portalCenter);
+            const distanceToPortal = playerPosition.distanceTo(portalCenter);
+
+            if (distanceToPortal < (config.portalInteractionDistance / 2)) { // Use a threshold slightly larger than portal radius
+                triggerPortal(targetUrl, isReturn);
+                return true; // Collision detected and triggered
+            }
         }
+        return false; // No collision
+    };
+
+    // Check exit portal
+    if (checkPortal(exitPortalGroup, exitPortalInnerMesh, config.portalTargetUrl, false)) {
+        return; // Stop checking if exit portal was triggered
     }
 
-    if (startPortalGroup && refUrl) {
-        const portalCenter = new THREE.Vector3();
-        startPortalBox.getCenter(portalCenter);
-        const distanceToStart = playerPosition.distanceTo(portalCenter);
-
-         if (distanceToStart < config.portalInteractionDistance) {
-             if (distanceToStart < config.portalCollisionThreshold) {
-                  const raycaster = new THREE.Raycaster(playerPosition, portalCenter.clone().sub(playerPosition).normalize());
-                  const intersects = raycaster.intersectObject(startPortalInnerMesh);
-
-                  if (intersects.length > 0 && intersects[0].distance < 1.5) {
-                      triggerPortal(refUrl, true);
-                  }
-             }
-         }
+    // Check start portal (if it exists and has a refUrl)
+    if (refUrl && checkPortal(startPortalGroup, startPortalInnerMesh, refUrl, true)) {
+        return; // Stop checking if start portal was triggered
     }
 }
+
 
 let isRedirecting = false;
 
 function triggerPortal(targetUrl, isReturnPortal) {
     if (isRedirecting) return;
     isRedirecting = true;
-    controls.unlock(); 
+    controls.unlock(); // Release pointer lock
 
     console.log(`Entering portal to: ${targetUrl}`);
 
@@ -410,31 +453,44 @@ function triggerPortal(targetUrl, isReturnPortal) {
 
     newParams.append('portal', 'true');
 
+    // Append player data
     newParams.append('username', config.player.username);
     newParams.append('color', config.player.color);
 
-    const currentSpeed = playerVelocity.length();
-    newParams.append('speed', currentSpeed > 0.1 ? currentSpeed.toFixed(2) : config.player.speed.toFixed(2)); 
+    // Append current speed (magnitude of XZ velocity - approximation as we don't store velocity now)
+    // We can estimate speed based on movement keys or pass a default like config speed
+    let currentSpeed = 0;
+    if (moveForward || moveBackward || moveLeft || moveRight) {
+        currentSpeed = config.player.speed;
+    }
+    newParams.append('speed', currentSpeed.toFixed(2));
 
-    newParams.append('speed_x', playerVelocity.x.toFixed(2));
-    newParams.append('speed_z', playerVelocity.z.toFixed(2));
+    // Append velocity components (approximated or zeroed if not moving)
+    // Since we removed playerVelocity, let's pass 0 for now or reconstruct from direction
+    // For simplicity, pass 0. Can be enhanced later if needed.
+    newParams.append('speed_x', '0.00');
+    newParams.append('speed_z', '0.00');
 
+    // Append rotation (horizontal look direction)
     if (controls) {
         const euler = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ');
-        newParams.append('rotation_y', euler.y.toFixed(4)); 
+        newParams.append('rotation_y', euler.y.toFixed(4));
     }
 
+    // Append ref URL logic
     if (isReturnPortal) {
-        for (const [key, value] of currentParams) {
-             if (key !== 'portal' && !newParams.has(key)) { 
+        // Keep existing params from the original entry, excluding 'portal' and 'ref' itself if it was the one we used to return
+         for (const [key, value] of currentParams) {
+             if (key !== 'portal' && key !== 'ref' && !newParams.has(key)) {
                  newParams.append(key, value);
              }
          }
-        if (!newParams.has('ref') && currentParams.has('ref')) {
-             newParams.append('ref', currentParams.get('ref'));
-        }
+         // Make sure the original 'ref' (which pointed TO this world) is not re-added if it exists.
+         // The targetUrl already is the refUrl.
     } else {
+        // Going to a NEW world, set ref to current location
         newParams.append('ref', window.location.origin + window.location.pathname);
+        // Keep other existing params
         for (const [key, value] of currentParams) {
              if (key !== 'portal' && key !== 'ref' && !newParams.has(key)) {
                  newParams.append(key, value);
@@ -442,9 +498,11 @@ function triggerPortal(targetUrl, isReturnPortal) {
          }
     }
 
+
+    // Construct final URL
     let finalUrl = targetUrl;
     if (!finalUrl.startsWith('http://') && !finalUrl.startsWith('https://')) {
-        finalUrl = 'https://' + finalUrl; 
+        finalUrl = 'https://' + finalUrl; // Assume https if no protocol
     }
 
     const paramString = newParams.toString();
@@ -455,21 +513,23 @@ function triggerPortal(targetUrl, isReturnPortal) {
 
     console.log("Redirecting to:", finalUrl);
 
+    // Fade out effect before redirect
     document.body.style.transition = 'opacity 0.3s ease-out';
     document.body.style.opacity = '0';
 
     setTimeout(() => {
         window.location.href = finalUrl;
-    }, 300); 
+    }, 300); // Delay matches fade out duration
 }
 
 function animate() {
     requestAnimationFrame(animate);
     const delta = clock.getDelta();
 
-    updatePlayer(delta);
-    checkPortalCollisions(); 
+    updatePlayer(delta); // Update player/camera position and rotation based on input
+    checkPortalCollisions(); // Check if player entered a portal
 
+    // Animate portal visual effects
     animatePortalParticles(exitPortalParticles);
     animatePortalParticles(startPortalParticles);
 
