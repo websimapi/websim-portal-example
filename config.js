@@ -7,8 +7,8 @@ const config = {
         username: `guest_${Math.random().toString(36).substring(7)}`, 
     },
     spawnPoint: { x: 0, y: 0, z: 0 },
-    exitPortalPosition: { x: -15, y: 5, z: -20 }, 
-    portalInteractionDistance: 4.5, 
+    exitPortalPosition: { x: -15, y: 5, z: -20, radius: 5 }, 
+    portalInteractionDistance: 4.0, 
     startPortalColor: 0xff0000, 
     exitPortalColor: 0x00ff00, 
 };
